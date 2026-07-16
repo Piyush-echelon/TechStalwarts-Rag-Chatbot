@@ -3,8 +3,9 @@ Test fixtures and shared utilities.
 
 Includes:
 - A sample PDF created in-memory with fpdf2 (no network calls).
-- A mock OpenAI API key so pydantic-settings initialises Settings.
+- A mock Groq API key so pydantic-settings initialises Settings.
 - A pre-built list of LangChain Documents for unit tests.
+- A fake embeddings fixture that bypasses the TF-IDF vectorizer.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from langchain_core.documents import Document
 
 # ── Patch env so Settings initialises without a real API key ─────────────────
 os.environ.setdefault("GROQ_API_KEY", "gsk_test_0000000000000000000000000000000000000000000000000000")
-os.environ.setdefault("CHROMA_PERSIST_DIR", tempfile.mkdtemp())
 
 
 # ── Sample PDF fixture ────────────────────────────────────────────────────────
@@ -78,14 +78,17 @@ def sample_chunks(sample_documents) -> List[Document]:
 
 
 @pytest.fixture()
-def mock_openai_embeddings(monkeypatch):
+def mock_embeddings(monkeypatch):
     """
-    Replace FastEmbedEmbeddings with a deterministic fake that returns
-    stable 384-dim vectors without downloading any model or hitting the network.
+    Replace TFIDFEmbeddings with a deterministic fake that returns
+    stable 128-dim vectors without fitting on any corpus.
     """
     import hashlib
 
     class _FakeEmbeddings:
+        def fit(self, texts):
+            return self
+
         def embed_documents(self, texts: List[str]) -> List[List[float]]:
             return [self._text_to_vec(t) for t in texts]
 
@@ -94,16 +97,20 @@ def mock_openai_embeddings(monkeypatch):
 
         @staticmethod
         def _text_to_vec(text: str) -> List[float]:
-            """Stable 384-dim float vector derived from text hash."""
+            """Stable 128-dim float vector derived from text hash."""
             digest = hashlib.sha256(text.encode()).digest()
-            # Extend to 384 floats by repeating the digest
-            raw = list(digest) * (384 // len(digest) + 1)
-            return [b / 255.0 for b in raw[:384]]
+            raw = list(digest) * (128 // len(digest) + 1)
+            return [b / 255.0 for b in raw[:128]]
 
-    monkeypatch.setattr(
-        "app.rag.embeddings.FastEmbedEmbeddings", lambda **_: _FakeEmbeddings()
-    )
-    monkeypatch.setattr(
-        "app.rag.embeddings.get_embeddings", lambda: _FakeEmbeddings()
-    )
-    return _FakeEmbeddings()
+    fake = _FakeEmbeddings()
+
+    monkeypatch.setattr("app.rag.embeddings.TFIDFEmbeddings", lambda: fake)
+    monkeypatch.setattr("app.rag.embeddings.get_embeddings", lambda collection_name="_default": fake)
+    monkeypatch.setattr("app.rag.embeddings.create_and_fit_embeddings", lambda texts, collection_name: fake)
+    return fake
+
+
+# Backwards-compatible alias
+@pytest.fixture()
+def mock_openai_embeddings(mock_embeddings):
+    return mock_embeddings
