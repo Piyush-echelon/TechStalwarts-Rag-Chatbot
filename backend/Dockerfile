@@ -1,10 +1,5 @@
 FROM python:3.11-slim
 
-# Install system dependencies needed by PyMuPDF
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libmupdf-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Copy and install dependencies first (cache layer)
@@ -17,13 +12,9 @@ COPY . .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/chroma_data && \
     chown -R appuser:appuser /app
 
 USER appuser
-
-# ChromaDB persistence volume
-VOLUME ["/app/chroma_data"]
 
 EXPOSE 8000
 
